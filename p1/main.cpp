@@ -54,7 +54,7 @@ int main(int, char**)
         0,0,0,0,0,0,0,10,15,20,23,28,
         33,35,34,31,28,10,0,0,0,0,0,0 };
 
-    float socini = 0.2f;   // Initial battery SoC
+    float socini = 0.2f, socmin = 0.1f, socmax = 0.9f;  // Battery SoC: initial, min, max
     int   Pbmax  = 200;    // Battery capacity (kWh)
     float effin  = 0.95f;  // Battery efficiency
 
@@ -65,7 +65,7 @@ int main(int, char**)
     IloNumVarArray  PGbuy  (env, T, 0, IloInfinity); // Grid power bought
     IloNumVarArray  PGsell (env, T, 0, IloInfinity); // Grid power sold
 
-    IloNumVarArray  statoc (env, T, 0, 1);    // Battery state of charge
+    IloNumVarArray  statoc (env, T, socmin, socmax);    // Battery state of charge (constrained to [socmin, socmax])
     IloNumVarArray  Bchg   (env, T, 0, Mchg); // Battery charging power
     IloNumVarArray  Bdischg(env, T, 0, Mdis); // Battery discharging power
     IloBoolVarArray ubat   (env, T);          // 1 = charging, 0 = discharging
@@ -100,15 +100,15 @@ int main(int, char**)
         {
             model.add(statoc[t] == socini
                       + ((effin * Bchg[t] - (Bdischg[t] / effin)) / Pbmax));
-            model.add(Bchg[t]    <= (Pbmax * (1 - socini) / effin));
-            model.add(Bdischg[t] <= (Pbmax * socini * effin));
+            model.add(Bchg[t]    <= (Pbmax * (socmax - socini) / effin));
+            model.add(Bdischg[t] <= (Pbmax * (socini - socmin) * effin));
         }
         else
         {
             model.add(statoc[t] == statoc[t - 1]
                       + ((effin * Bchg[t] - (Bdischg[t] / effin)) / Pbmax));
-            model.add(Bchg[t]    <= (Pbmax * (1 - statoc[t - 1])) / effin);
-            model.add(Bdischg[t] <= Pbmax * statoc[t - 1] * effin);
+            model.add(Bchg[t]    <= (Pbmax * (socmax - statoc[t - 1])) / effin);
+            model.add(Bdischg[t] <= Pbmax * (statoc[t - 1] - socmin) * effin);
         }
 
         // Power balance

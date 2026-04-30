@@ -6,7 +6,7 @@
 //    snippet#1 lines  63-117 : Cooling demand and chiller-related data
 //    snippet#2 lines 118-224 : New decision variables: Hac (AC heat) and Pec
 //    snippet#3 lines 225-273 : Coupled balances — electricity, heat, cooling
-//    snippet#4 lines 274-316 : CSV output extended with the cooling load
+//    snippet#4 lines 275-302 : CSV output with every variable in its own column
 //
 //  Author : Talha Rehman <https://github.com/TalhaRehmanMTRKT>
 //  Refactored with Claude Opus 4.7
@@ -35,7 +35,7 @@ int main(int, char**)
     int Cchp1 = 150;
     int Cchp2 = 145;
 
-    float socini = 0.2f;
+    float socini = 0.2f, socmin = 0.1f, socmax = 0.9f;  // Battery / heat-storage / EV SoC: initial, min, max
     int   Pbmax  = 150;
     float effin  = 0.95f;
     int   Hssmax = 50;
@@ -98,7 +98,7 @@ int main(int, char**)
     // ===== Microgrid decision variables (electric + heat sides, same as p3) =====
     IloNumVarArray PGbuy  (env, T, 0, IloInfinity);
     IloNumVarArray PGsell (env, T, 0, IloInfinity);
-    IloNumVarArray statoc (env, T, 0, 1);
+    IloNumVarArray statoc (env, T, socmin, socmax);
     IloNumVarArray Bchg   (env, T, 0, 100);
     IloNumVarArray Bdischg(env, T, 0, 100);
     IloNumVarArray Pdg1   (env, T, 0, 100, ILOINT);
@@ -108,7 +108,7 @@ int main(int, char**)
 
     IloNumVarArray HGbuy  (env, T, 0, IloInfinity, ILOINT);
     IloNumVarArray HGsell (env, T, 0, IloInfinity, ILOINT);
-    IloNumVarArray HSSsoc (env, T, 0, 1);
+    IloNumVarArray HSSsoc (env, T, socmin, socmax);
     IloNumVarArray Hchg   (env, T, 0, 50, ILOINT);
     IloNumVarArray Hdischg(env, T, 0, 50, ILOINT);
     IloNumVarArray Hhob   (env, T, 0, 80, ILOINT);
@@ -135,7 +135,7 @@ int main(int, char**)
     for (int n = 0; n < numEvs; n++) {
         Pevchg[n]    = IloNumVarArray (env, T, 0, evcap[n], ILOFLOAT);
         Pevdischg[n] = IloNumVarArray (env, T, 0, evcap[n], ILOFLOAT);
-        evsoc[n]     = IloNumVarArray (env, T, 0, 1,        ILOFLOAT);
+        evsoc[n]     = IloNumVarArray (env, T, socmin, socmax, ILOFLOAT);
         uev[n]       = IloBoolVarArray(env, T);
     }
 
@@ -172,23 +172,23 @@ int main(int, char**)
         if (t == 0) {
             model.add(statoc[t] == socini
                       + ((effin * Bchg[t] - Bdischg[t] / effin) / Pbmax));
-            model.add(Bchg[t]    <= (Pbmax * (1 - socini) / effin));
-            model.add(Bdischg[t] <= (Pbmax * socini * effin));
+            model.add(Bchg[t]    <= (Pbmax * (socmax - socini) / effin));
+            model.add(Bdischg[t] <= (Pbmax * (socini - socmin) * effin));
 
             model.add(HSSsoc[t] == 0.5
                       + ((Heffin * Hchg[t] - Hdischg[t] / Heffin) / Hssmax));
-            model.add(Hchg[t]    <= (Hssmax * 0.5 / Heffin));
-            model.add(Hdischg[t] <= (Hssmax * 0.5 * Heffin));
+            model.add(Hchg[t]    <= (Hssmax * (socmax - 0.5) / Heffin));
+            model.add(Hdischg[t] <= (Hssmax * (0.5 - socmin) * Heffin));
         } else {
             model.add(statoc[t] == statoc[t - 1]
                       + ((effin * Bchg[t] - Bdischg[t] / effin) / Pbmax));
-            model.add(Bchg[t]    <= (Pbmax * (1 - statoc[t - 1])) / effin);
-            model.add(Bdischg[t] <= Pbmax * statoc[t - 1] * effin);
+            model.add(Bchg[t]    <= (Pbmax * (socmax - statoc[t - 1])) / effin);
+            model.add(Bdischg[t] <= Pbmax * (statoc[t - 1] - socmin) * effin);
 
             model.add(HSSsoc[t] == HSSsoc[t - 1]
                       + ((Heffin * Hchg[t] - Hdischg[t] / Heffin) / Hssmax));
-            model.add(Hchg[t]    <= (Hssmax * (1 - HSSsoc[t - 1]) / Heffin));
-            model.add(Hdischg[t] <= Hssmax * HSSsoc[t - 1] * Heffin);
+            model.add(Hchg[t]    <= (Hssmax * (socmax - HSSsoc[t - 1]) / Heffin));
+            model.add(Hdischg[t] <= Hssmax * (HSSsoc[t - 1] - socmin) * Heffin);
         }
 
         for (int n = 0; n < numEvs; n++)
@@ -197,8 +197,8 @@ int main(int, char**)
             {
                 model.add(evsoc[n][t] == evsocini[n]
                           + (Eveffin * Pevchg[n][t] - Pevdischg[n][t] / Eveffin) / evcap[n]);
-                model.add(Pevchg[n][t]    <= evcap[n] * (1 - evsocini[n]) / Eveffin);
-                model.add(Pevdischg[n][t] <= evcap[n] * evsocini[n] * Eveffin);
+                model.add(Pevchg[n][t]    <= evcap[n] * (socmax - evsocini[n]) / Eveffin);
+                model.add(Pevdischg[n][t] <= evcap[n] * (evsocini[n] - socmin) * Eveffin);
                 // Big-M mutex: per-vehicle charge XOR discharge
                 model.add(Pevchg[n][t]    <= 1e6 *      uev[n][t]);
                 model.add(Pevdischg[n][t] <= 1e6 * (1 - uev[n][t]));
@@ -207,8 +207,8 @@ int main(int, char**)
             {
                 model.add(evsoc[n][t] == evsoc[n][t - 1]
                           + (Eveffin * Pevchg[n][t] - Pevdischg[n][t] / Eveffin) / evcap[n]);
-                model.add(Pevchg[n][t]    <= evcap[n] * (1 - evsoc[n][t - 1]) / Eveffin);
-                model.add(Pevdischg[n][t] <= evcap[n] * evsoc[n][t - 1] * Eveffin);
+                model.add(Pevchg[n][t]    <= evcap[n] * (socmax - evsoc[n][t - 1]) / Eveffin);
+                model.add(Pevdischg[n][t] <= evcap[n] * (evsoc[n][t - 1] - socmin) * Eveffin);
                 // Big-M mutex: per-vehicle charge XOR discharge
                 model.add(Pevchg[n][t]    <= 1e6 *      uev[n][t]);
                 model.add(Pevdischg[n][t] <= 1e6 * (1 - uev[n][t]));
@@ -271,37 +271,61 @@ int main(int, char**)
     cout << "Solution status     : " << cplex.getStatus() << endl;
     cout << "Minimized objective : " << obj << endl;
 
-    // -------- snippet#4 lines 274-316 : CSV output extended with cooling --------
-    // Pload and Hload include the chiller draws, so the CSV reports the
-    // effective electric/heat loads. Cload is reported alongside.
+    // -------- snippet#4 lines 275-302 : CSV output with every variable in its own column --------
+    // Each decision variable is written to a separate column so the
+    // electric, heat, and cooling sectors can be inspected directly:
+    //   - Pload, Hload, Cload         : raw demands on each carrier
+    //   - PGbuy/PGsell, HGbuy/HGsell  : grid trading on electric/heat buses
+    //   - Bchg/Bdischg, Hchg/Hdischg  : storage flows (and SoC trajectories)
+    //   - Pdg1, Pdg2, Pchp1, Pchp2    : dispatchable electric units
+    //   - Hhob, Hchp1, Hchp2          : heat producers
+    //   - Hac, Pec                    : energy *consumed* by the AC and EC
+    //   - Cac = COP_ac*Hac, Cec       : cooling *produced* by the AC and EC
+    //   - Pevchg/Pevdischg/evsoc      : per-vehicle EV trajectories
     std::ofstream outputFile("output.csv");
     if (outputFile.is_open()) {
-        outputFile << "Time,Pload+Pec,Hload+Hac,Cload,CGbuy,CGsell,CHsell,CHbuy,Rdg1,"
-                      "PGbuy_minus_PGsell,statoc,Bchg_dischg,Pdg1,Pdg2,"
-                      "Pchp1,Pchp2,Hhob,Hchp1,Hchp2,HGbuy_minus_HGsell,"
-                      "Hchg_dischg";
-        for (int n = 0; n < numEvs; n++)
-            outputFile << ",Pev" << n + 1;
+        outputFile << "Time,Pload,Hload,Cload,"
+                      "CGbuy,CGsell,CHbuy,CHsell,Rdg1,"
+                      "PGbuy,PGsell,statoc,Bchg,Bdischg,"
+                      "Pdg1,Pdg2,Pchp1,Pchp2,"
+                      "Hhob,Hchp1,Hchp2,HGbuy,HGsell,"
+                      "HSSsoc,Hchg,Hdischg,"
+                      "Hac,Pec,Cac,Cec";
+        for (int n = 0; n < numEvs; n++) outputFile << ",Pevchg"    << n + 1;
+        for (int n = 0; n < numEvs; n++) outputFile << ",Pevdischg" << n + 1;
+        for (int n = 0; n < numEvs; n++) outputFile << ",evsoc"     << n + 1;
         outputFile << std::endl;
 
         for (int i = 0; i < T; i++) {
             outputFile << i + 1 << ","
-                       << Pload[i] + cplex.getValue(Pec[i]) << ","
-                       << Hload[i] + cplex.getValue(Hac[i]) << ","
-                       << Cload[i]  << ","
+                       << Pload[i]  << "," << Hload[i] << "," << Cload[i] << ","
                        << CGbuy[i]  << "," << CGsell[i] << ","
-                       << CHsell[i] << "," << CHbuy[i]  << "," << Rdg1[i] << ","
-                       <<  cplex.getValue(PGbuy[i]) - cplex.getValue(PGsell[i])  << ","
-                       <<  cplex.getValue(statoc[i])                              << ","
-                       << -cplex.getValue(Bchg[i])  + cplex.getValue(Bdischg[i])  << ","
-                       <<  cplex.getValue(Pdg1[i])  << "," << cplex.getValue(Pdg2[i]) << ","
-                       <<  cplex.getValue(Pchp1[i]) << "," << cplex.getValue(Pchp2[i])<< ","
-                       <<  cplex.getValue(Hhob[i])  << ","
-                       <<  cplex.getValue(Hchp1[i]) << "," << cplex.getValue(Hchp2[i])<< ","
-                       <<  cplex.getValue(HGbuy[i]) - cplex.getValue(HGsell[i])  << ","
-                       << -cplex.getValue(Hchg[i])  + cplex.getValue(Hdischg[i]);
-            for (int n = 0; n < numEvs; n++)
-                outputFile << "," << -cplex.getValue(Pevchg[n][i]) + cplex.getValue(Pevdischg[n][i]);
+                       << CHbuy[i]  << "," << CHsell[i] << "," << Rdg1[i] << ","
+                       << cplex.getValue(PGbuy[i])   << "," << cplex.getValue(PGsell[i])  << ","
+                       << cplex.getValue(statoc[i])  << ","
+                       << cplex.getValue(Bchg[i])    << "," << cplex.getValue(Bdischg[i]) << ","
+                       << cplex.getValue(Pdg1[i])    << "," << cplex.getValue(Pdg2[i])    << ","
+                       << cplex.getValue(Pchp1[i])   << "," << cplex.getValue(Pchp2[i])   << ","
+                       << cplex.getValue(Hhob[i])    << ","
+                       << cplex.getValue(Hchp1[i])   << "," << cplex.getValue(Hchp2[i])   << ","
+                       << cplex.getValue(HGbuy[i])   << "," << cplex.getValue(HGsell[i])  << ","
+                       << cplex.getValue(HSSsoc[i])  << ","
+                       << cplex.getValue(Hchg[i])    << "," << cplex.getValue(Hdischg[i]) << ","
+                       << cplex.getValue(Hac[i])     << "," << cplex.getValue(Pec[i])     << ","
+                       << 0.85 * cplex.getValue(Hac[i]) << ","
+                       << 0.95 * cplex.getValue(Pec[i]);
+            for (int n = 0; n < numEvs; n++) {
+                bool connected = (i >= ta[n] && i <= td[n]);
+                outputFile << "," << (connected ? cplex.getValue(Pevchg[n][i]) : 0.0);
+            }
+            for (int n = 0; n < numEvs; n++) {
+                bool connected = (i >= ta[n] && i <= td[n]);
+                outputFile << "," << (connected ? cplex.getValue(Pevdischg[n][i]) : 0.0);
+            }
+            for (int n = 0; n < numEvs; n++) {
+                bool connected = (i >= ta[n] && i <= td[n]);
+                outputFile << "," << (connected ? cplex.getValue(evsoc[n][i]) : 0.0);
+            }
             outputFile << std::endl;
         }
         outputFile.close();

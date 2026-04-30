@@ -36,7 +36,7 @@ int main(int, char**)
     int Cchp1 = 150;
     int Cchp2 = 145;
 
-    float socini = 0.2f;
+    float socini = 0.2f, socmin = 0.1f, socmax = 0.9f;  // Battery / heat-storage / EV SoC: initial, min, max
     int   Pbmax  = 100;
     float effin  = 0.95f;
     int   Hssmax = 50;
@@ -93,7 +93,7 @@ int main(int, char**)
     // ===== Microgrid decision variables (electric + heat side, same as p2) =====
     IloNumVarArray PGbuy  (env, T, 0, IloInfinity);
     IloNumVarArray PGsell (env, T, 0, IloInfinity);
-    IloNumVarArray statoc (env, T, 0, 1);
+    IloNumVarArray statoc (env, T, socmin, socmax);
     IloNumVarArray Bchg   (env, T, 0, 100);
     IloNumVarArray Bdischg(env, T, 0, 100);
     IloNumVarArray Pdg1   (env, T, 0, 100, ILOINT);
@@ -103,7 +103,7 @@ int main(int, char**)
 
     IloNumVarArray HGbuy  (env, T, 0, IloInfinity, ILOINT);
     IloNumVarArray HGsell (env, T, 0, IloInfinity, ILOINT);
-    IloNumVarArray HSSsoc (env, T, 0, 1);
+    IloNumVarArray HSSsoc (env, T, socmin, socmax);
     IloNumVarArray Hchg   (env, T, 0, 50, ILOINT);
     IloNumVarArray Hdischg(env, T, 0, 50, ILOINT);
     IloNumVarArray Hhob   (env, T, 0, 80, ILOINT);
@@ -125,7 +125,7 @@ int main(int, char**)
     {
         Pevchg[n]    = IloNumVarArray (env, T, 0, evcap[n], ILOFLOAT);
         Pevdischg[n] = IloNumVarArray (env, T, 0, evcap[n], ILOFLOAT);
-        evsoc[n]     = IloNumVarArray (env, T, 0, 1,        ILOFLOAT);
+        evsoc[n]     = IloNumVarArray (env, T, socmin, socmax, ILOFLOAT);
         uev[n]       = IloBoolVarArray(env, T);
     }
 
@@ -162,23 +162,23 @@ int main(int, char**)
         if (t == 0) {
             model.add(statoc[t] == socini
                       + ((effin * Bchg[t] - Bdischg[t] / effin) / Pbmax));
-            model.add(Bchg[t]    <= (Pbmax * (1 - socini) / effin));
-            model.add(Bdischg[t] <= (Pbmax * socini * effin));
+            model.add(Bchg[t]    <= (Pbmax * (socmax - socini) / effin));
+            model.add(Bdischg[t] <= (Pbmax * (socini - socmin) * effin));
 
             model.add(HSSsoc[t] == 0.5
                       + ((Heffin * Hchg[t] - Hdischg[t] / Heffin) / Hssmax));
-            model.add(Hchg[t]    <= (Hssmax * 0.5 / Heffin));
-            model.add(Hdischg[t] <= (Hssmax * 0.5 * Heffin));
+            model.add(Hchg[t]    <= (Hssmax * (socmax - 0.5) / Heffin));
+            model.add(Hdischg[t] <= (Hssmax * (0.5 - socmin) * Heffin));
         } else {
             model.add(statoc[t] == statoc[t - 1]
                       + ((effin * Bchg[t] - Bdischg[t] / effin) / Pbmax));
-            model.add(Bchg[t]    <= (Pbmax * (1 - statoc[t - 1])) / effin);
-            model.add(Bdischg[t] <= Pbmax * statoc[t - 1] * effin);
+            model.add(Bchg[t]    <= (Pbmax * (socmax - statoc[t - 1])) / effin);
+            model.add(Bdischg[t] <= Pbmax * (statoc[t - 1] - socmin) * effin);
 
             model.add(HSSsoc[t] == HSSsoc[t - 1]
                       + ((Heffin * Hchg[t] - Hdischg[t] / Heffin) / Hssmax));
-            model.add(Hchg[t]    <= (Hssmax * (1 - HSSsoc[t - 1]) / Heffin));
-            model.add(Hdischg[t] <= Hssmax * HSSsoc[t - 1] * Heffin);
+            model.add(Hchg[t]    <= (Hssmax * (socmax - HSSsoc[t - 1]) / Heffin));
+            model.add(Hdischg[t] <= Hssmax * (HSSsoc[t - 1] - socmin) * Heffin);
         }
     }
 
@@ -198,8 +198,8 @@ int main(int, char**)
             {
                 model.add(evsoc[n][t] == evsocini[n]
                           + (Eveffin * Pevchg[n][t] - Pevdischg[n][t] / Eveffin) / evcap[n]);
-                model.add(Pevchg[n][t]    <= evcap[n] * (1 - evsocini[n]) / Eveffin);
-                model.add(Pevdischg[n][t] <= evcap[n] * evsocini[n] * Eveffin);
+                model.add(Pevchg[n][t]    <= evcap[n] * (socmax - evsocini[n]) / Eveffin);
+                model.add(Pevdischg[n][t] <= evcap[n] * (evsocini[n] - socmin) * Eveffin);
                 // Big-M mutex: per-vehicle charge XOR discharge
                 model.add(Pevchg[n][t]    <= 1e6 *      uev[n][t]);
                 model.add(Pevdischg[n][t] <= 1e6 * (1 - uev[n][t]));
@@ -208,8 +208,8 @@ int main(int, char**)
             {
                 model.add(evsoc[n][t] == evsoc[n][t - 1]
                           + (Eveffin * Pevchg[n][t] - Pevdischg[n][t] / Eveffin) / evcap[n]);
-                model.add(Pevchg[n][t]    <= evcap[n] * (1 - evsoc[n][t - 1]) / Eveffin);
-                model.add(Pevdischg[n][t] <= evcap[n] * evsoc[n][t - 1] * Eveffin);
+                model.add(Pevchg[n][t]    <= evcap[n] * (socmax - evsoc[n][t - 1]) / Eveffin);
+                model.add(Pevdischg[n][t] <= evcap[n] * (evsoc[n][t - 1] - socmin) * Eveffin);
                 // Big-M mutex: per-vehicle charge XOR discharge
                 model.add(Pevchg[n][t]    <= 1e6 *      uev[n][t]);
                 model.add(Pevdischg[n][t] <= 1e6 * (1 - uev[n][t]));

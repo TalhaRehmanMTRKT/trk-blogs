@@ -38,7 +38,7 @@ int main(int, char**)
     int Cchp2 = 145;
 
     // Storage parameters
-    float socini = 0.2f;   // Initial battery SoC
+    float socini = 0.2f, socmin = 0.1f, socmax = 0.9f;  // Battery / heat-storage SoC: initial, min, max
     int   Pbmax  = 100;    // Battery capacity (kWh)
     float effin  = 0.95f;  // Battery efficiency
     int   Hssmax = 50;     // Heat-storage capacity (kWh-th)
@@ -89,7 +89,7 @@ int main(int, char**)
     // Electric side
     IloNumVarArray  PGbuy  (env, T, 0, IloInfinity);
     IloNumVarArray  PGsell (env, T, 0, IloInfinity);
-    IloNumVarArray  statoc (env, T, 0, 1);
+    IloNumVarArray  statoc (env, T, socmin, socmax);
     IloNumVarArray  Bchg   (env, T, 0, 50);
     IloNumVarArray  Bdischg(env, T, 0, 50);
     IloBoolVarArray ubat   (env, T);              // 1 = charge, 0 = discharge
@@ -101,7 +101,7 @@ int main(int, char**)
     // Heat side
     IloNumVarArray  HGbuy  (env, T, 0, IloInfinity, ILOINT);
     IloNumVarArray  HGsell (env, T, 0, IloInfinity, ILOINT);
-    IloNumVarArray  HSSsoc (env, T, 0, 1);
+    IloNumVarArray  HSSsoc (env, T, socmin, socmax);
     IloNumVarArray  Hchg   (env, T, 0, 50, ILOINT);
     IloNumVarArray  Hdischg(env, T, 0, 50, ILOINT);
     IloBoolVarArray uhst   (env, T);              // 1 = charge, 0 = discharge
@@ -156,26 +156,26 @@ int main(int, char**)
             // Battery (electric)
             model.add(statoc[t] == socini
                       + ((effin * Bchg[t] - Bdischg[t] / effin) / Pbmax));
-            model.add(Bchg[t]    <= (Pbmax * (1 - socini) / effin));
-            model.add(Bdischg[t] <= (Pbmax * socini * effin));
+            model.add(Bchg[t]    <= (Pbmax * (socmax - socini) / effin));
+            model.add(Bdischg[t] <= (Pbmax * (socini - socmin) * effin));
 
             // Heat storage (assumed half-full at t=0)
             model.add(HSSsoc[t] == 0.5
                       + ((Heffin * Hchg[t] - Hdischg[t] / Heffin) / Hssmax));
-            model.add(Hchg[t]    <= (Hssmax * 0.5 / Heffin));
-            model.add(Hdischg[t] <= (Hssmax * 0.5 * Heffin));
+            model.add(Hchg[t]    <= (Hssmax * (socmax - 0.5) / Heffin));
+            model.add(Hdischg[t] <= (Hssmax * (0.5 - socmin) * Heffin));
         }
         else
         {
             model.add(statoc[t] == statoc[t - 1]
                       + ((effin * Bchg[t] - Bdischg[t] / effin) / Pbmax));
-            model.add(Bchg[t]    <= (Pbmax * (1 - statoc[t - 1])) / effin);
-            model.add(Bdischg[t] <= Pbmax * statoc[t - 1] * effin);
+            model.add(Bchg[t]    <= (Pbmax * (socmax - statoc[t - 1])) / effin);
+            model.add(Bdischg[t] <= Pbmax * (statoc[t - 1] - socmin) * effin);
 
             model.add(HSSsoc[t] == HSSsoc[t - 1]
                       + ((Heffin * Hchg[t] - Hdischg[t] / Heffin) / Hssmax));
-            model.add(Hchg[t]    <= (Hssmax * (1 - HSSsoc[t - 1]) / Heffin));
-            model.add(Hdischg[t] <= Hssmax * HSSsoc[t - 1] * Heffin);
+            model.add(Hchg[t]    <= (Hssmax * (socmax - HSSsoc[t - 1]) / Heffin));
+            model.add(Hdischg[t] <= Hssmax * (HSSsoc[t - 1] - socmin) * Heffin);
         }
     }
 

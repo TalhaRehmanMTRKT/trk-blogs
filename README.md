@@ -17,11 +17,13 @@ Source files contain marker comments of the form
 ```
 
 so the website's HTML generator can extract the right block to render
-inside the post. See `WORKFLOW.md` in the parent workspace for the full
-pipeline.
+inside the post.
 
 ## Posts
 
-| id | title                                                                       |
-|----|-----------------------------------------------------------------------------|
-| p1 | Introduction to Optimization with C++/CPLEX: A Microgrid Dispatch Example   |
+| id | title                                                                                  |
+|----|----------------------------------------------------------------------------------------|
+| p1 | Introduction to Optimization with C++/CPLEX: A Microgrid Dispatch Example              |
+| p2 | From Single Energy Microgrid to Multi Energy: Adding Heat to the Microgrid Dispatch    |
+| p3 | Adding Electric Vehicles as Flexible Storage to a Multi-Energy Microgrid               |
+| p4 | Closing the Loop with Cooling: A Three-Carrier Microgrid Dispatch                      |

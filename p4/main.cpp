@@ -164,10 +164,10 @@ int main(int, char**)
         model.add(Hchp2[t] == k2 * Pchp2[t]);
 
         // Big-M mutual exclusion: charge XOR discharge for each storage unit
-        model.add(Bchg[t]    <= 50 *      ubat[t]);
-        model.add(Bdischg[t] <= 50 * (1 - ubat[t]));
-        model.add(Hchg[t]    <= 50 *      uhst[t]);
-        model.add(Hdischg[t] <= 50 * (1 - uhst[t]));
+        model.add(Bchg[t]    <= 1e6 *      ubat[t]);
+        model.add(Bdischg[t] <= 1e6 * (1 - ubat[t]));
+        model.add(Hchg[t]    <= 1e6 *      uhst[t]);
+        model.add(Hdischg[t] <= 1e6 * (1 - uhst[t]));
 
         if (t == 0) {
             model.add(statoc[t] == socini
@@ -200,8 +200,8 @@ int main(int, char**)
                 model.add(Pevchg[n][t]    <= evcap[n] * (1 - evsocini[n]) / Eveffin);
                 model.add(Pevdischg[n][t] <= evcap[n] * evsocini[n] * Eveffin);
                 // Big-M mutex: per-vehicle charge XOR discharge
-                model.add(Pevchg[n][t]    <= evcap[n] *      uev[n][t]);
-                model.add(Pevdischg[n][t] <= evcap[n] * (1 - uev[n][t]));
+                model.add(Pevchg[n][t]    <= 1e6 *      uev[n][t]);
+                model.add(Pevdischg[n][t] <= 1e6 * (1 - uev[n][t]));
             }
             else if (t > ta[n] && t <= td[n])
             {
@@ -210,8 +210,8 @@ int main(int, char**)
                 model.add(Pevchg[n][t]    <= evcap[n] * (1 - evsoc[n][t - 1]) / Eveffin);
                 model.add(Pevdischg[n][t] <= evcap[n] * evsoc[n][t - 1] * Eveffin);
                 // Big-M mutex: per-vehicle charge XOR discharge
-                model.add(Pevchg[n][t]    <= evcap[n] *      uev[n][t]);
-                model.add(Pevdischg[n][t] <= evcap[n] * (1 - uev[n][t]));
+                model.add(Pevchg[n][t]    <= 1e6 *      uev[n][t]);
+                model.add(Pevdischg[n][t] <= 1e6 * (1 - uev[n][t]));
                 if (t == td[n]) model.add(evsoc[n][t] >= 0.5);
             }
             else

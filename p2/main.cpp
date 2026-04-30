@@ -146,10 +146,10 @@ int main(int, char**)
     for (int t = 0; t < T; t++)
     {
         // Big-M mutual exclusion: charge XOR discharge for each storage unit
-        model.add(Bchg[t]    <= 50 *      ubat[t]);
-        model.add(Bdischg[t] <= 50 * (1 - ubat[t]));
-        model.add(Hchg[t]    <= 50 *      uhst[t]);
-        model.add(Hdischg[t] <= 50 * (1 - uhst[t]));
+        model.add(Bchg[t]    <= 1e6 *      ubat[t]);
+        model.add(Bdischg[t] <= 1e6 * (1 - ubat[t]));
+        model.add(Hchg[t]    <= 1e6 *      uhst[t]);
+        model.add(Hdischg[t] <= 1e6 * (1 - uhst[t]));
 
         if (t == 0)
         {

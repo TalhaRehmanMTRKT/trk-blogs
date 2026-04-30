@@ -59,8 +59,8 @@ int main(int, char**)
     float effin  = 0.95f;  // Battery efficiency
 
     // -------- snippet#2 lines 61-75 : Decision variables --------
-    const float Mchg = 100.0f; // Big-M for charging power
-    const float Mdis = 100.0f; // Big-M for discharging power
+    const float Mchg = 1e6f; // Big-M for charging power
+    const float Mdis = 1e6f; // Big-M for discharging power
 
     IloNumVarArray  PGbuy  (env, T, 0, IloInfinity); // Grid power bought
     IloNumVarArray  PGsell (env, T, 0, IloInfinity); // Grid power sold

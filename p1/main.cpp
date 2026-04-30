@@ -3,15 +3,16 @@
 //  File: main.cpp
 //
 //  Snippet map (referenced from trk-blogs-docs/p1.tex):
-//    snippet#1 lines  29-59  : Microgrid input data
-//    snippet#2 lines  61-75  : Decision variables (with binary ubat for charge/discharge)
-//    snippet#3 lines  76-86  : Objective function
-//    snippet#4 lines  87-119 : Constraints (DG bounds, battery Big-M, power balance)
-//    snippet#5 lines 120-138 : Solve and report
-//    snippet#6 lines 139-171 : Write results to CSV
+//    snippet#1 lines  30-60  : Microgrid input data
+//    snippet#2 lines  62-76  : Decision variables (with binary ubat for charge/discharge)
+//    snippet#3 lines  77-87  : Objective function
+//    snippet#4 lines  88-120 : Constraints (DG bounds, battery Big-M, power balance)
+//    snippet#5 lines 121-139 : Solve and report
+//    snippet#6 lines 140-172 : Write results to CSV
 //
-//  When you reference a snippet in the .tex, use \codesnippet{N}{...}{nnn}{nnn}
-//  with the line numbers shown above. Keep them in sync if you edit this file.
+//  Author : Talha Rehman <https://github.com/TalhaRehmanMTRKT>
+//  Notes  : the snippet markers below are the source of truth for HTML
+//           extraction; line numbers in the map are approximate.
 // =============================================================================
 
 #include <ilcplex/ilocplex.h>
@@ -26,7 +27,7 @@ int main(int, char**)
     IloEnv env;
     IloModel model(env);
 
-    // -------- snippet#1 lines 29-59 : Microgrid input data --------
+    // -------- snippet#1 lines 30-60 : Microgrid input data --------
     int T     = 24;   // One day (hours)
     int Cdg1  = 80;   // Cost per kW from DG-1
     int Cdg2  = 90;   // Cost per kW from DG-2
@@ -58,7 +59,7 @@ int main(int, char**)
     int   Pbmax  = 200;    // Battery capacity (kWh)
     float effin  = 0.95f;  // Battery efficiency
 
-    // -------- snippet#2 lines 61-75 : Decision variables --------
+    // -------- snippet#2 lines 62-76 : Decision variables --------
     const float Mchg = 100.0f; // Big-M for charging power
     const float Mdis = 100.0f; // Big-M for discharging power
 
@@ -73,7 +74,7 @@ int main(int, char**)
     IloNumVarArray  Pdg1   (env, T, 0,  80);  // DG-1 output
     IloNumVarArray  Pdg2   (env, T, 0, 100);  // DG-2 output
 
-    // -------- snippet#3 lines 76-86 : Objective function --------
+    // -------- snippet#3 lines 77-87 : Objective function --------
     IloExpr objective(env);
     for (int t = 0; t < T; t++)
     {
@@ -84,7 +85,7 @@ int main(int, char**)
     }
     model.add(IloMinimize(env, objective));
 
-    // -------- snippet#4 lines 87-119 : Constraints --------
+    // -------- snippet#4 lines 88-120 : Constraints --------
     for (int t = 0; t < T; t++)
     {
         // DG output bounds
@@ -117,7 +118,7 @@ int main(int, char**)
                   + PGbuy[t]   - PGsell[t] == Pload[t]);
     }
 
-    // -------- snippet#5 lines 120-138 : Solve and report --------
+    // -------- snippet#5 lines 121-139 : Solve and report --------
     IloCplex cplex(env);
     cplex.extract(model);
     cplex.exportModel("Model.lp");
@@ -136,7 +137,7 @@ int main(int, char**)
     cout << "Solution status     : " << cplex.getStatus() << endl;
     cout << "Minimized objective : " << obj << endl;
 
-    // -------- snippet#6 lines 139-171 : Write results to CSV --------
+    // -------- snippet#6 lines 140-172 : Write results to CSV --------
     std::ofstream outputFile("output.csv");
     if (outputFile.is_open()) {
         outputFile << "Time,Pload,CGbuy,CGsell,Rdg1,Rdg2,"

@@ -3,16 +3,14 @@
 //  File: main.cpp
 //
 //  Snippet map (referenced from trk-blogs-docs/p3.tex):
-//    snippet#1 lines  48-113 : EV fleet input data (arrival, departure, capacity)
-//    snippet#2 lines 114-174 : 2-D decision variables for EV charge/discharge/SoC
-//    snippet#3 lines 175-211 : EV scheduling constraints (per vehicle, per hour)
-//    snippet#4 lines 212-253 : Power balance updated with the EV fleet term
-//    snippet#5 lines 254-299 : CSV output extended with per-vehicle columns
+//    snippet#1 lines  47-112 : EV fleet input data (arrival, departure, capacity)
+//    snippet#2 lines 113-184 : 2-D decision variables for EV charge/discharge/SoC
+//    snippet#3 lines 185-227 : EV scheduling constraints (per vehicle, per hour)
+//    snippet#4 lines 228-269 : Power balance updated with the EV fleet term
+//    snippet#5 lines 270-315 : CSV output extended with per-vehicle columns
 //
 //  Author : Talha Rehman <https://github.com/TalhaRehmanMTRKT>
-//  This post extends the heat-coupled microgrid from p2; everything outside the
-//  snippets above is identical to p2 (same generator, CHP, HOB, heat storage,
-//  battery and heat-trading model). Refer to p2.tex for the rest of the model.
+//  Refactored with Claude Opus 4.7
 // =============================================================================
 
 #include <ilcplex/ilocplex.h>
@@ -21,7 +19,8 @@
 #include <fstream>
 ILOSTLBEGIN
 
-typedef IloArray<IloNumVarArray> NumVar2D;
+typedef IloArray<IloNumVarArray>  NumVar2D;
+typedef IloArray<IloBoolVarArray> BoolVar2D;
 
 int main(int, char**)
 {
@@ -45,7 +44,7 @@ int main(int, char**)
     float k1 = 1.2f;
     float k2 = 0.8f;
 
-    // -------- snippet#1 lines 48-113 : EV fleet input data --------
+    // -------- snippet#1 lines 47-112 : EV fleet input data --------
     int   numEvs   = 5;                        // Total number of EVs
     float Eveffin  = 0.90f;                    // EV charge/discharge efficiency
 
@@ -111,18 +110,23 @@ int main(int, char**)
     IloNumVarArray Hchp1  (env, T, 0, IloInfinity);
     IloNumVarArray Hchp2  (env, T, 0, IloInfinity);
 
-    // -------- snippet#2 lines 114-174 : 2-D EV decision variables --------
+    // -------- snippet#2 lines 113-184 : 2-D EV decision variables --------
     // For each EV n we allocate three length-T variable arrays. The charge and
     // discharge power are upper-bounded by the vehicle's own capacity; the SoC
-    // is dimensionless in [0,1] (fraction of capacity).
-    NumVar2D Pevchg   (env, numEvs);
-    NumVar2D Pevdischg(env, numEvs);
-    NumVar2D evsoc    (env, numEvs);
+    // is dimensionless in [0,1] (fraction of capacity). A binary uev per
+    // vehicle enforces charge XOR discharge via Big-M.
+    IloBoolVarArray ubat(env, T);   // battery charge/discharge selector
+    IloBoolVarArray uhst(env, T);   // heat-storage charge/discharge selector
+    NumVar2D  Pevchg   (env, numEvs);
+    NumVar2D  Pevdischg(env, numEvs);
+    NumVar2D  evsoc    (env, numEvs);
+    BoolVar2D uev      (env, numEvs);
     for (int n = 0; n < numEvs; n++)
     {
-        Pevchg[n]    = IloNumVarArray(env, T, 0, evcap[n], ILOFLOAT);
-        Pevdischg[n] = IloNumVarArray(env, T, 0, evcap[n], ILOFLOAT);
-        evsoc[n]     = IloNumVarArray(env, T, 0, 1,        ILOFLOAT);
+        Pevchg[n]    = IloNumVarArray (env, T, 0, evcap[n], ILOFLOAT);
+        Pevdischg[n] = IloNumVarArray (env, T, 0, evcap[n], ILOFLOAT);
+        evsoc[n]     = IloNumVarArray (env, T, 0, 1,        ILOFLOAT);
+        uev[n]       = IloBoolVarArray(env, T);
     }
 
     // ===== Objective (same cost terms as p2; EV charge/discharge has no own price) =====
@@ -149,6 +153,12 @@ int main(int, char**)
         model.add(Hchp1[t] == k1 * Pchp1[t]);
         model.add(Hchp2[t] == k2 * Pchp2[t]);
 
+        // Big-M mutual exclusion: charge XOR discharge for each storage unit
+        model.add(Bchg[t]    <= 50 *      ubat[t]);
+        model.add(Bdischg[t] <= 50 * (1 - ubat[t]));
+        model.add(Hchg[t]    <= 50 *      uhst[t]);
+        model.add(Hdischg[t] <= 50 * (1 - uhst[t]));
+
         if (t == 0) {
             model.add(statoc[t] == socini
                       + ((effin * Bchg[t] - Bdischg[t] / effin) / Pbmax));
@@ -172,7 +182,7 @@ int main(int, char**)
         }
     }
 
-    // -------- snippet#3 lines 175-211 : EV scheduling constraints --------
+    // -------- snippet#3 lines 185-227 : EV scheduling constraints --------
     // For every vehicle n and every hour t we have three regimes:
     //   1. t == ta[n]            : connection hour, SoC starts from evsocini[n].
     //   2. ta[n] <  t <= td[n]   : connected, SoC follows charge/discharge.
@@ -190,6 +200,9 @@ int main(int, char**)
                           + (Eveffin * Pevchg[n][t] - Pevdischg[n][t] / Eveffin) / evcap[n]);
                 model.add(Pevchg[n][t]    <= evcap[n] * (1 - evsocini[n]) / Eveffin);
                 model.add(Pevdischg[n][t] <= evcap[n] * evsocini[n] * Eveffin);
+                // Big-M mutex: per-vehicle charge XOR discharge
+                model.add(Pevchg[n][t]    <= evcap[n] *      uev[n][t]);
+                model.add(Pevdischg[n][t] <= evcap[n] * (1 - uev[n][t]));
             }
             else if (t > ta[n] && t <= td[n])
             {
@@ -197,6 +210,9 @@ int main(int, char**)
                           + (Eveffin * Pevchg[n][t] - Pevdischg[n][t] / Eveffin) / evcap[n]);
                 model.add(Pevchg[n][t]    <= evcap[n] * (1 - evsoc[n][t - 1]) / Eveffin);
                 model.add(Pevdischg[n][t] <= evcap[n] * evsoc[n][t - 1] * Eveffin);
+                // Big-M mutex: per-vehicle charge XOR discharge
+                model.add(Pevchg[n][t]    <= evcap[n] *      uev[n][t]);
+                model.add(Pevdischg[n][t] <= evcap[n] * (1 - uev[n][t]));
 
                 if (t == td[n])
                     model.add(evsoc[n][t] >= 0.5);
@@ -209,7 +225,7 @@ int main(int, char**)
         }
     }
 
-    // -------- snippet#4 lines 212-253 : Power balance with EV fleet term --------
+    // -------- snippet#4 lines 228-269 : Power balance with EV fleet term --------
     for (int t = 0; t < T; t++)
     {
         IloExpr evCharge   (env);
@@ -251,7 +267,7 @@ int main(int, char**)
     cout << "Solution status     : " << cplex.getStatus() << endl;
     cout << "Minimized objective : " << obj << endl;
 
-    // -------- snippet#5 lines 254-299 : CSV output extended with per-vehicle columns --------
+    // -------- snippet#5 lines 270-315 : CSV output extended with per-vehicle columns --------
     std::ofstream outputFile("output.csv");
     if (outputFile.is_open()) {
         outputFile << "Time,Pload,Hload,CGbuy,CGsell,CHsell,CHbuy,Rdg1,"

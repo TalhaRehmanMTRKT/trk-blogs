@@ -3,15 +3,13 @@
 //  File: main.cpp
 //
 //  Snippet map (referenced from trk-blogs-docs/p4.tex):
-//    snippet#1 lines  64-118 : Cooling demand and chiller-related data
-//    snippet#2 lines 119-207 : New decision variables: Hac (AC heat) and Pec
-//    snippet#3 lines 208-256 : Coupled balances — electricity, heat, cooling
-//    snippet#4 lines 257-299 : CSV output extended with the cooling load
+//    snippet#1 lines  63-117 : Cooling demand and chiller-related data
+//    snippet#2 lines 118-224 : New decision variables: Hac (AC heat) and Pec
+//    snippet#3 lines 225-273 : Coupled balances — electricity, heat, cooling
+//    snippet#4 lines 274-316 : CSV output extended with the cooling load
 //
 //  Author : Talha Rehman <https://github.com/TalhaRehmanMTRKT>
-//  This post extends the EV-aware microgrid from p3; the dispatch model, the
-//  EV fleet handling and the storage dynamics are inherited unchanged. Only
-//  the cooling sector and the three balance equations are new.
+//  Refactored with Claude Opus 4.7
 // =============================================================================
 
 #include <ilcplex/ilocplex.h>
@@ -20,7 +18,8 @@
 #include <fstream>
 ILOSTLBEGIN
 
-typedef IloArray<IloNumVarArray> NumVar2D;
+typedef IloArray<IloNumVarArray>  NumVar2D;
+typedef IloArray<IloBoolVarArray> BoolVar2D;
 
 int main(int, char**)
 {
@@ -61,7 +60,7 @@ int main(int, char**)
         175, 190, 195, 200, 195, 195, 180, 170,
         185, 190, 195, 200, 195, 190, 180, 175 };
 
-    // -------- snippet#1 lines 64-118 : Cooling demand and chiller efficiencies --------
+    // -------- snippet#1 lines 63-117 : Cooling demand and chiller efficiencies --------
     // The cooling load is served by two devices:
     //   - an absorption chiller (AC) that consumes heat with COP_ac = 0.85
     //   - an electric chiller   (EC) that consumes electricity with COP_ec = 0.95
@@ -116,7 +115,7 @@ int main(int, char**)
     IloNumVarArray Hchp1  (env, T, 0, IloInfinity);
     IloNumVarArray Hchp2  (env, T, 0, IloInfinity);
 
-    // -------- snippet#2 lines 119-207 : Cooling-sector decision variables --------
+    // -------- snippet#2 lines 118-224 : Cooling-sector decision variables --------
     // Hac : heat drawn from the heat bus by the absorption chiller (kWh-th)
     // Pec : electricity drawn from the electric bus by the electric chiller (kW)
     // Both are continuous and non-negative; their cooling contribution is
@@ -124,14 +123,20 @@ int main(int, char**)
     IloNumVarArray Hac (env, T, 0, IloInfinity);
     IloNumVarArray Pec (env, T, 0, IloInfinity);
 
-    // EV decision variables (same as p3)
-    NumVar2D Pevchg   (env, numEvs);
-    NumVar2D Pevdischg(env, numEvs);
-    NumVar2D evsoc    (env, numEvs);
+    // Big-M mutex selectors (battery, heat storage; per-EV uev declared below)
+    IloBoolVarArray ubat(env, T);
+    IloBoolVarArray uhst(env, T);
+
+    // EV decision variables (same as p3) plus per-vehicle Big-M selector uev
+    NumVar2D  Pevchg   (env, numEvs);
+    NumVar2D  Pevdischg(env, numEvs);
+    NumVar2D  evsoc    (env, numEvs);
+    BoolVar2D uev      (env, numEvs);
     for (int n = 0; n < numEvs; n++) {
-        Pevchg[n]    = IloNumVarArray(env, T, 0, evcap[n], ILOFLOAT);
-        Pevdischg[n] = IloNumVarArray(env, T, 0, evcap[n], ILOFLOAT);
-        evsoc[n]     = IloNumVarArray(env, T, 0, 1,        ILOFLOAT);
+        Pevchg[n]    = IloNumVarArray (env, T, 0, evcap[n], ILOFLOAT);
+        Pevdischg[n] = IloNumVarArray (env, T, 0, evcap[n], ILOFLOAT);
+        evsoc[n]     = IloNumVarArray (env, T, 0, 1,        ILOFLOAT);
+        uev[n]       = IloBoolVarArray(env, T);
     }
 
     // ===== Objective (operating costs of generation + grid trading) =====
@@ -157,6 +162,12 @@ int main(int, char**)
 
         model.add(Hchp1[t] == k1 * Pchp1[t]);
         model.add(Hchp2[t] == k2 * Pchp2[t]);
+
+        // Big-M mutual exclusion: charge XOR discharge for each storage unit
+        model.add(Bchg[t]    <= 50 *      ubat[t]);
+        model.add(Bdischg[t] <= 50 * (1 - ubat[t]));
+        model.add(Hchg[t]    <= 50 *      uhst[t]);
+        model.add(Hdischg[t] <= 50 * (1 - uhst[t]));
 
         if (t == 0) {
             model.add(statoc[t] == socini
@@ -188,6 +199,9 @@ int main(int, char**)
                           + (Eveffin * Pevchg[n][t] - Pevdischg[n][t] / Eveffin) / evcap[n]);
                 model.add(Pevchg[n][t]    <= evcap[n] * (1 - evsocini[n]) / Eveffin);
                 model.add(Pevdischg[n][t] <= evcap[n] * evsocini[n] * Eveffin);
+                // Big-M mutex: per-vehicle charge XOR discharge
+                model.add(Pevchg[n][t]    <= evcap[n] *      uev[n][t]);
+                model.add(Pevdischg[n][t] <= evcap[n] * (1 - uev[n][t]));
             }
             else if (t > ta[n] && t <= td[n])
             {
@@ -195,6 +209,9 @@ int main(int, char**)
                           + (Eveffin * Pevchg[n][t] - Pevdischg[n][t] / Eveffin) / evcap[n]);
                 model.add(Pevchg[n][t]    <= evcap[n] * (1 - evsoc[n][t - 1]) / Eveffin);
                 model.add(Pevdischg[n][t] <= evcap[n] * evsoc[n][t - 1] * Eveffin);
+                // Big-M mutex: per-vehicle charge XOR discharge
+                model.add(Pevchg[n][t]    <= evcap[n] *      uev[n][t]);
+                model.add(Pevdischg[n][t] <= evcap[n] * (1 - uev[n][t]));
                 if (t == td[n]) model.add(evsoc[n][t] >= 0.5);
             }
             else
@@ -205,7 +222,7 @@ int main(int, char**)
         }
     }
 
-    // -------- snippet#3 lines 208-256 : Coupled balances — electricity, heat, cooling --------
+    // -------- snippet#3 lines 225-273 : Coupled balances — electricity, heat, cooling --------
     // The electric chiller appears as an extra electric load (-Pec); the
     // absorption chiller appears as an extra heat load (-Hac); together they
     // produce cooling power that must equal the cooling demand:
@@ -254,7 +271,7 @@ int main(int, char**)
     cout << "Solution status     : " << cplex.getStatus() << endl;
     cout << "Minimized objective : " << obj << endl;
 
-    // -------- snippet#4 lines 257-299 : CSV output extended with cooling --------
+    // -------- snippet#4 lines 274-316 : CSV output extended with cooling --------
     // Pload and Hload include the chiller draws, so the CSV reports the
     // effective electric/heat loads. Cload is reported alongside.
     std::ofstream outputFile("output.csv");

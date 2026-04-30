@@ -3,17 +3,16 @@
 //  File: main.cpp
 //
 //  Snippet map (referenced from trk-blogs-docs/p2.tex):
-//    snippet#1 lines  31-88  : Microgrid input data (electric + heat)
-//    snippet#2 lines  89-110 : Decision variables (electric + heat side)
-//    snippet#3 lines 111-122 : Objective function
-//    snippet#4 lines 123-143 : Generator, CHP and HOB bounds + CHP heat coupling
-//    snippet#5 lines 144-174 : Battery and heat-storage dynamics
-//    snippet#6 lines 175-189 : Power and heat balance equations
-//    snippet#7 lines 190-246 : Solve, report, write CSV
+//    snippet#1 lines  30-87  : Microgrid input data (electric + heat)
+//    snippet#2 lines  88-111 : Decision variables (electric + heat side)
+//    snippet#3 lines 112-123 : Objective function
+//    snippet#4 lines 124-144 : Generator, CHP and HOB bounds + CHP heat coupling
+//    snippet#5 lines 145-181 : Battery and heat-storage dynamics
+//    snippet#6 lines 182-196 : Power and heat balance equations
+//    snippet#7 lines 197-253 : Solve, report, write CSV
 //
 //  Author : Talha Rehman <https://github.com/TalhaRehmanMTRKT>
-//  Notes  : the snippet markers below are the source of truth for HTML
-//           extraction; line numbers in the map are approximate.
+//  Refactored with Claude Opus 4.7
 // =============================================================================
 
 #include <ilcplex/ilocplex.h>
@@ -28,7 +27,7 @@ int main(int, char**)
     IloEnv env;
     IloModel model(env);
 
-    // -------- snippet#1 lines 31-88 : Microgrid input data --------
+    // -------- snippet#1 lines 30-87 : Microgrid input data --------
     int T     = 24;   // One day (hours)
 
     // Generation costs (per kW)
@@ -86,29 +85,31 @@ int main(int, char**)
         0,0,0,0,0,0,0,10,15,20,23,28,
         33,35,34,31,28,10,0,0,0,0,0,0 };
 
-    // -------- snippet#2 lines 89-110 : Decision variables --------
+    // -------- snippet#2 lines 88-111 : Decision variables --------
     // Electric side
-    IloNumVarArray PGbuy  (env, T, 0, IloInfinity);
-    IloNumVarArray PGsell (env, T, 0, IloInfinity);
-    IloNumVarArray statoc (env, T, 0, 1);
-    IloNumVarArray Bchg   (env, T, 0, 50);
-    IloNumVarArray Bdischg(env, T, 0, 50);
-    IloNumVarArray Pdg1   (env, T, 0, 100, ILOINT);
-    IloNumVarArray Pdg2   (env, T, 0,  80, ILOINT);
-    IloNumVarArray Pchp1  (env, T, 30, 60, ILOINT);
-    IloNumVarArray Pchp2  (env, T, 50,100, ILOINT);
+    IloNumVarArray  PGbuy  (env, T, 0, IloInfinity);
+    IloNumVarArray  PGsell (env, T, 0, IloInfinity);
+    IloNumVarArray  statoc (env, T, 0, 1);
+    IloNumVarArray  Bchg   (env, T, 0, 50);
+    IloNumVarArray  Bdischg(env, T, 0, 50);
+    IloBoolVarArray ubat   (env, T);              // 1 = charge, 0 = discharge
+    IloNumVarArray  Pdg1   (env, T, 0, 100, ILOINT);
+    IloNumVarArray  Pdg2   (env, T, 0,  80, ILOINT);
+    IloNumVarArray  Pchp1  (env, T, 30, 60, ILOINT);
+    IloNumVarArray  Pchp2  (env, T, 50,100, ILOINT);
 
     // Heat side
-    IloNumVarArray HGbuy  (env, T, 0, IloInfinity, ILOINT);
-    IloNumVarArray HGsell (env, T, 0, IloInfinity, ILOINT);
-    IloNumVarArray HSSsoc (env, T, 0, 1);
-    IloNumVarArray Hchg   (env, T, 0, 50, ILOINT);
-    IloNumVarArray Hdischg(env, T, 0, 50, ILOINT);
-    IloNumVarArray Hhob   (env, T, 0, 80, ILOINT);
-    IloNumVarArray Hchp1  (env, T, 0, IloInfinity);
-    IloNumVarArray Hchp2  (env, T, 0, IloInfinity);
+    IloNumVarArray  HGbuy  (env, T, 0, IloInfinity, ILOINT);
+    IloNumVarArray  HGsell (env, T, 0, IloInfinity, ILOINT);
+    IloNumVarArray  HSSsoc (env, T, 0, 1);
+    IloNumVarArray  Hchg   (env, T, 0, 50, ILOINT);
+    IloNumVarArray  Hdischg(env, T, 0, 50, ILOINT);
+    IloBoolVarArray uhst   (env, T);              // 1 = charge, 0 = discharge
+    IloNumVarArray  Hhob   (env, T, 0, 80, ILOINT);
+    IloNumVarArray  Hchp1  (env, T, 0, IloInfinity);
+    IloNumVarArray  Hchp2  (env, T, 0, IloInfinity);
 
-    // -------- snippet#3 lines 111-122 : Objective function --------
+    // -------- snippet#3 lines 112-123 : Objective function --------
     IloExpr objective(env);
     for (int t = 0; t < T; t++)
     {
@@ -120,7 +121,7 @@ int main(int, char**)
     }
     model.add(IloMinimize(env, objective));
 
-    // -------- snippet#4 lines 123-143 : Generator / CHP / HOB bounds and heat coupling --------
+    // -------- snippet#4 lines 124-144 : Generator / CHP / HOB bounds and heat coupling --------
     for (int t = 0; t < T; t++)
     {
         // Dispatchable-generator output bounds
@@ -141,9 +142,15 @@ int main(int, char**)
         model.add(Hchp2[t] == k2 * Pchp2[t]);
     }
 
-    // -------- snippet#5 lines 144-174 : Battery and heat-storage dynamics --------
+    // -------- snippet#5 lines 145-181 : Battery and heat-storage dynamics --------
     for (int t = 0; t < T; t++)
     {
+        // Big-M mutual exclusion: charge XOR discharge for each storage unit
+        model.add(Bchg[t]    <= 50 *      ubat[t]);
+        model.add(Bdischg[t] <= 50 * (1 - ubat[t]));
+        model.add(Hchg[t]    <= 50 *      uhst[t]);
+        model.add(Hdischg[t] <= 50 * (1 - uhst[t]));
+
         if (t == 0)
         {
             // Battery (electric)
@@ -172,7 +179,7 @@ int main(int, char**)
         }
     }
 
-    // -------- snippet#6 lines 175-189 : Power and heat balance equations --------
+    // -------- snippet#6 lines 182-196 : Power and heat balance equations --------
     for (int t = 0; t < T; t++)
     {
         // Electric balance
@@ -187,7 +194,7 @@ int main(int, char**)
                   - Hchg[t]  + Hdischg[t] == Hload[t]);
     }
 
-    // -------- snippet#7 lines 190-246 : Solve, report, write CSV --------
+    // -------- snippet#7 lines 197-253 : Solve, report, write CSV --------
     IloCplex cplex(env);
     cplex.extract(model);
     cplex.exportModel("ModelLP.lp");

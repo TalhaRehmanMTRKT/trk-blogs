@@ -4,11 +4,11 @@
 //
 //  Snippet map (referenced from trk-blogs-docs/p1.tex):
 //    snippet#1 lines  29-59  : Microgrid input data
-//    snippet#2 lines  61-71  : Decision variables
-//    snippet#3 lines  73-82  : Objective function
-//    snippet#4 lines  84-113 : Constraints (DG bounds, battery, power balance)
-//    snippet#5 lines 115-132 : Solve and report
-//    snippet#6 lines 134-159 : Write results to CSV
+//    snippet#2 lines  61-75  : Decision variables (with binary ubat for charge/discharge)
+//    snippet#3 lines  76-86  : Objective function
+//    snippet#4 lines  87-119 : Constraints (DG bounds, battery Big-M, power balance)
+//    snippet#5 lines 120-138 : Solve and report
+//    snippet#6 lines 139-171 : Write results to CSV
 //
 //  When you reference a snippet in the .tex, use \codesnippet{N}{...}{nnn}{nnn}
 //  with the line numbers shown above. Keep them in sync if you edit this file.
@@ -58,19 +58,22 @@ int main(int, char**)
     int   Pbmax  = 200;    // Battery capacity (kWh)
     float effin  = 0.95f;  // Battery efficiency
 
-    // -------- snippet#2 lines 61-71 : Decision variables --------
-    IloNumVarArray PGbuy  (env, T, 0, IloInfinity); // Grid power bought
-    IloNumVarArray PGsell (env, T, 0, IloInfinity); // Grid power sold
+    // -------- snippet#2 lines 61-75 : Decision variables --------
+    const float Mchg = 100.0f; // Big-M for charging power
+    const float Mdis = 100.0f; // Big-M for discharging power
 
-    IloNumVarArray statoc (env, T, 0, 1);   // Battery state of charge
+    IloNumVarArray  PGbuy  (env, T, 0, IloInfinity); // Grid power bought
+    IloNumVarArray  PGsell (env, T, 0, IloInfinity); // Grid power sold
 
-    IloNumVarArray Bchg   (env, T, 0, 100); // Battery charging
-    IloNumVarArray Bdischg(env, T, 0, 100); // Battery discharging
+    IloNumVarArray  statoc (env, T, 0, 1);    // Battery state of charge
+    IloNumVarArray  Bchg   (env, T, 0, Mchg); // Battery charging power
+    IloNumVarArray  Bdischg(env, T, 0, Mdis); // Battery discharging power
+    IloBoolVarArray ubat   (env, T);          // 1 = charging, 0 = discharging
 
-    IloNumVarArray Pdg1   (env, T, 0, 80);  // DG-1 output
-    IloNumVarArray Pdg2   (env, T, 0, 100); // DG-2 output
+    IloNumVarArray  Pdg1   (env, T, 0,  80);  // DG-1 output
+    IloNumVarArray  Pdg2   (env, T, 0, 100);  // DG-2 output
 
-    // -------- snippet#3 lines 73-82 : Objective function --------
+    // -------- snippet#3 lines 76-86 : Objective function --------
     IloExpr objective(env);
     for (int t = 0; t < T; t++)
     {
@@ -81,16 +84,18 @@ int main(int, char**)
     }
     model.add(IloMinimize(env, objective));
 
-    // -------- snippet#4 lines 84-113 : Constraints --------
+    // -------- snippet#4 lines 87-119 : Constraints --------
     for (int t = 0; t < T; t++)
     {
         // DG output bounds
-        model.add(0 <= Pdg1[t]);  model.add(Pdg1[t] <= 80);
-        model.add(0 <= Pdg2[t]);  model.add(Pdg2[t] <= 90);
+        model.add(Pdg1[t] <= 80);
+        model.add(Pdg2[t] <= 90);
 
-        // Battery state of charge bounds
-        model.add(0 <= statoc[t]); model.add(statoc[t] <= 1);
+        // Mutual exclusion: charge XOR discharge via Big-M and binary ubat
+        model.add(Bchg[t]    <= Mchg *      ubat[t]);
+        model.add(Bdischg[t] <= Mdis * (1 - ubat[t]));
 
+        // Battery dynamics and SoC-derived charge / discharge limits
         if (t == 0)
         {
             model.add(statoc[t] == socini
@@ -112,10 +117,10 @@ int main(int, char**)
                   + PGbuy[t]   - PGsell[t] == Pload[t]);
     }
 
-    // -------- snippet#5 lines 115-132 : Solve and report --------
+    // -------- snippet#5 lines 120-138 : Solve and report --------
     IloCplex cplex(env);
     cplex.extract(model);
-    cplex.exportModel("ModelLP.lp");
+    cplex.exportModel("Model.lp");
     cplex.setOut(env.getNullStream());
 
     if (!cplex.solve()) {
@@ -131,11 +136,12 @@ int main(int, char**)
     cout << "Solution status     : " << cplex.getStatus() << endl;
     cout << "Minimized objective : " << obj << endl;
 
-    // -------- snippet#6 lines 134-159 : Write results to CSV --------
+    // -------- snippet#6 lines 139-171 : Write results to CSV --------
     std::ofstream outputFile("output.csv");
     if (outputFile.is_open()) {
         outputFile << "Time,Pload,CGbuy,CGsell,Rdg1,Rdg2,"
-                      "PGbuy,PGsell,statoc,Bchg,Bdischg,Pdg1,Pdg2" << std::endl;
+                      "PGbuy,PGsell,statoc,Bchg,Bdischg,ubat,Pdg1,Pdg2"
+                   << std::endl;
 
         for (int i = 0; i < T; i++) {
             outputFile << i + 1                 << ","
@@ -149,6 +155,7 @@ int main(int, char**)
                        <<  cplex.getValue(statoc[i])  << ","
                        << -cplex.getValue(Bchg[i])    << ","
                        <<  cplex.getValue(Bdischg[i]) << ","
+                       <<  cplex.getValue(ubat[i])    << ","
                        <<  cplex.getValue(Pdg1[i])    << ","
                        <<  cplex.getValue(Pdg2[i])    << std::endl;
         }
